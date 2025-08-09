@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cliente de Xadrez UCI</title>
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #333; color: #f1f1f1; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 20px; box-sizing: border-box; }
+        .container { display: flex; flex-wrap: wrap; gap: 30px; align-items: flex-start; max-width: 1000px; width: 100%; }
+        .board-container { flex-grow: 1; max-width: 560px; width: 100%; }
+        .controls-container { width: 350px; min-width: 300px; display: flex; flex-direction: column; gap: 15px; }
+        .control-group, .info-group { background-color: #444; padding: 15px; border-radius: 8px; border: 1px solid #555; }
+        h2, h3 { margin-top: 0; color: #6495ed; border-bottom: 2px solid #555; padding-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; }
+        input[type="text"], select { width: 100%; padding: 8px; box-sizing: border-box; background-color: #2b2b2b; color: white; border: 1px solid #666; border-radius: 4px; }
+        button { width: 100%; padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; transition: background-color 0.3s; }
+        button:hover { background-color: #218838; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        #log { height: 200px; overflow-y: scroll; background-color: #2b2b2b; padding: 10px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; white-space: pre-wrap; border: 1px solid #666; font-size: 0.9em; }
+        #status, .timers { font-size: 1.1em; padding: 10px; background-color: #2b2b2b; border-radius: 4px; text-align: center; }
+        .timers { display: flex; justify-content: space-around; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="board-container">
+        <div id="myBoard"></div>
+    </div>
+    <div class="controls-container">
+        <div id="setup-container" class="control-group">
+            <h2>Configuração do Jogo</h2>
+            <label for="ngrok-token">Token do Servidor Ngrok:</label>
+            <input type="text" id="ngrok-token" placeholder="Cole o token do ngrok aqui">
+            <label for="player-color" style="margin-top: 10px;">Jogar como:</label>
+            <select id="player-color">
+                <option value="w">Brancas</option>
+                <option value="b">Pretas</option>
+            </select>
+            <label for="game-time" style="margin-top: 10px;">Tempo de Jogo (por jogador):</label>
+            <select id="game-time">
+                <option value="60000">1 Minuto</option>
+                <option value="180000">3 Minutos</option>
+                <option value="300000">5 Minutos</option>
+                <option value="600000">10 Minutos</option>
+            </select>
+            <button id="start-btn" style="margin-top: 20px;">Iniciar Jogo</button>
+        </div>
+        <div id="info-container" class="info-group" style="display:none;">
+            <h3>Status e Timers</h3>
+            <div id="status">Aguardando início...</div>
+            <div class="timers">
+                <div id="player-timer">Jogador: 05:00</div>
+                <div id="engine-timer">Engine: 05:00</div>
+            </div>
+            <h3 style="margin-top: 20px;">Log de Comandos</h3>
+            <div id="log"></div>
+             <button id="reset-btn" style="margin-top: 10px; background-color: #dc3545;">Nova Partida</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let board = null, game = new Chess(), ngrokURL = '', playerColor = 'w';
+    let gameTimeMillis = 300000, playerTime, engineTime, timerInterval = null;
+
+    const $log = $('#log'), $status = $('#status'), $startBtn = $('#start-btn');
+    const $ngrokTokenInput = $('#ngrok-token'), $playerColorSelect = $('#player-color'), $gameTimeSelect = $('#game-time');
+    
+    $('#myBoard').hide();
+    $('#info-container').hide();
+
+    async function sendUCICommand(command) {
+        if (!ngrokURL) { alert('URL do servidor não configurada!'); return; }
+        logToScreen(`> ${command}`);
+        try {
+            const response = await fetch(`${ngrokURL}/uci`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: command }),
+            });
+            if (!response.ok) throw new Error(`Erro de rede: ${response.statusText}`);
+            const data = await response.json();
+            if (data.response && data.response.trim() !== '') {
+                logToScreen(`< ${data.response}`);
+            }
+            return data.response;
+        } catch (error) {
+            logToScreen(`< ERRO: ${error.message}`);
+            $status.text('Erro de Conexão!');
+            return null;
+        }
+    }
+
+    async function getEngineMove() {
+        const positionCommand = `position fen ${game.fen()}`;
+        const goCommand = `go wtime ${playerColor === 'w' ? playerTime : engineTime} btime ${playerColor === 'b' ? playerTime : engineTime}`;
+        await sendUCICommand(positionCommand);
+        const response = await sendUCICommand(goCommand);
+        if (response) {
+            const match = response.match(/bestmove\s+(\S+)/);
+            if (match && match[1]) {
+                game.move(match[1], { sloppy: true });
+                board.position(game.fen());
+                updateStatus();
+            } else { logToScreen("< ERRO: Engine não retornou 'bestmove'."); }
+        }
+    }
+
+    function onDrop(source, target) {
+        const move = game.move({ from: source, to: target, promotion: 'q' });
+        if (move === null) return 'snapback';
+        updateStatus();
+        if (!game.game_over()) { window.setTimeout(getEngineMove, 250); }
+    }
+    
+    function onDragStart(source, piece) {
+        return !game.game_over() && game.turn() === playerColor && playerTime > 0;
+    }
+
+    function updateStatus() {
+        let status = '', turn = game.turn() === 'w' ? 'Brancas' : 'Pretas';
+        
+        if (playerTime <= 0) {
+            status = 'Fim de Jogo, seu tempo acabou.';
+            clearInterval(timerInterval);
+        } else if (engineTime <= 0) {
+            status = 'Fim de Jogo, o tempo da engine acabou.';
+            clearInterval(timerInterval);
+        }
+        else if (game.in_checkmate()) { status = `Fim de Jogo, ${turn} em Xeque-mate.`; clearInterval(timerInterval); }
+        else if (game.in_draw()) { status = 'Fim de Jogo, Empate.'; clearInterval(timerInterval); }
+        else { status = `Vez das ${turn}`; if (game.in_check()) { status += ', Xeque!'; } }
+        $status.text(status);
+    }
+
+    function logToScreen(message) {
+        $log.append(message + '\n');
+        $log.scrollTop($log[0].scrollHeight);
+    }
+
+    function formatTime(ms) {
+        const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+        const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+        const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+        return `${minutes}:${seconds}`;
+    }
+
+    function updateTimers() {
+        if (game.game_over()) { clearInterval(timerInterval); return; }
+        if (game.turn() === playerColor) { playerTime -= 1000; } else { engineTime -= 1000; }
+        $('#player-timer').text(`Jogador: ${formatTime(playerTime)}`);
+        $('#engine-timer').text(`Engine: ${formatTime(engineTime)}`);
+        if (playerTime < 0) { $status.text('Fim de Jogo, tempo do jogador esgotado.'); clearInterval(timerInterval); }
+        else if (engineTime < 0) { $status.text('Fim de Jogo, tempo da engine esgotado.'); clearInterval(timerInterval); }
+    }
+
+    async function startGame() {
+        const ngrokToken = $ngrokTokenInput.val().trim();
+        if (!ngrokToken) { alert('Por favor, insira o token do servidor ngrok.'); return; }
+        ngrokURL = `https://${ngrokToken}.ngrok-free.app`;
+        playerColor = $playerColorSelect.val();
+        gameTimeMillis = parseInt($gameTimeSelect.val(), 10);
+        $startBtn.prop('disabled', true).text('Conectando...');
+        
+        const readyResponse = await sendUCICommand('isready');
+        if (!readyResponse || !readyResponse.includes('readyok')) {
+             alert('Não foi possível conectar ou a engine não está pronta.');
+             $startBtn.prop('disabled', false).text('Iniciar Jogo'); return;
+        }
+
+        $('#setup-container').hide(); $('#info-container').show(); $('#myBoard').show();
+        game.reset(); await sendUCICommand('ucinewgame');
+        
+        const config = {
+            draggable: true,
+            position: 'start',
+            orientation: playerColor === 'w' ? 'white' : 'black',
+            
+            pieceTheme: function(piece) {
+                const pieceFileName = piece.toLowerCase() + '.png';
+                
+                return 'https://assets-themes.chess.com/image/ejgfv/150/' + pieceFileName;
+            },
+
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onSnapEnd: () => board.position(game.fen())
+        };
+        board = Chessboard('myBoard', config);
+        $(window).resize(board.resize);
+
+        playerTime = engineTime = gameTimeMillis;
+        $('#player-timer').text(`Jogador: ${formatTime(playerTime)}`);
+        $('#engine-timer').text(`Engine: ${formatTime(engineTime)}`);
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(updateTimers, 1000);
+
+        if (playerColor === 'b') { getEngineMove(); }
+        updateStatus();
+    }
+    
+    $startBtn.on('click', startGame);
+    $('#reset-btn').on('click', () => location.reload());
+</script>
+
+</body>
+</html>
