@@ -11,6 +11,7 @@
 
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #333; color: #f1f1f1; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 20px; box-sizing: border-box; }
+        #myBoard { touch-action: none; }
         .container { display: flex; flex-wrap: wrap; gap: 30px; align-items: flex-start; max-width: 1000px; width: 100%; }
         .board-container { flex-grow: 1; max-width: 560px; width: 100%; }
         .controls-container { width: 350px; min-width: 300px; display: flex; flex-direction: column; gap: 15px; }
@@ -34,31 +35,31 @@
     </div>
     <div class="controls-container">
         <div id="setup-container" class="control-group">
-            <h2>Configuração do Jogo</h2>
-            <label for="ngrok-token">Token do Servidor Ngrok:</label>
-            <input type="text" id="ngrok-token" placeholder="Cole o token do ngrok aqui">
+            <h2>Game Config</h2>
+            <label for="ngrok-token">Token:</label>
+            <input type="text" id="ngrok-token" placeholder="Token">
             <label for="player-color" style="margin-top: 10px;">Jogar como:</label>
             <select id="player-color">
                 <option value="w">Brancas</option>
                 <option value="b">Pretas</option>
             </select>
-            <label for="game-time" style="margin-top: 10px;">Tempo de Jogo (por jogador):</label>
+            <label for="game-time" style="margin-top: 10px;">Tempo de Jogo:</label>
             <select id="game-time">
                 <option value="60000">1 Minuto</option>
                 <option value="180000">3 Minutos</option>
                 <option value="300000">5 Minutos</option>
                 <option value="600000">10 Minutos</option>
             </select>
-            <button id="start-btn" style="margin-top: 20px;">Iniciar Jogo</button>
+            <button id="start-btn" style="margin-top: 20px;">Start</button>
         </div>
         <div id="info-container" class="info-group" style="display:none;">
             <h3>Status e Timers</h3>
             <div id="status">Aguardando início...</div>
             <div class="timers">
-                <div id="player-timer">Jogador: 05:00</div>
+                <div id="player-timer">Player: 05:00</div>
                 <div id="engine-timer">Engine: 05:00</div>
             </div>
-            <h3 style="margin-top: 20px;">Log de Comandos</h3>
+            <h3 style="margin-top: 20px;">Log</h3>
             <div id="log"></div>
              <button id="reset-btn" style="margin-top: 10px; background-color: #dc3545;">Nova Partida</button>
         </div>
@@ -153,15 +154,15 @@
     function updateTimers() {
         if (game.game_over()) { clearInterval(timerInterval); return; }
         if (game.turn() === playerColor) { playerTime -= 1000; } else { engineTime -= 1000; }
-        $('#player-timer').text(`Jogador: ${formatTime(playerTime)}`);
+        $('#player-timer').text(`Player: ${formatTime(playerTime)}`);
         $('#engine-timer').text(`Engine: ${formatTime(engineTime)}`);
-        if (playerTime < 0) { $status.text('Fim de Jogo, tempo do jogador esgotado.'); clearInterval(timerInterval); }
+        if (playerTime < 0) { $status.text('Fim de Jogo, tempo do player esgotado.'); clearInterval(timerInterval); }
         else if (engineTime < 0) { $status.text('Fim de Jogo, tempo da engine esgotado.'); clearInterval(timerInterval); }
     }
 
     async function startGame() {
         const ngrokToken = $ngrokTokenInput.val().trim();
-        if (!ngrokToken) { alert('Por favor, insira o token do servidor ngrok.'); return; }
+        if (!ngrokToken) { alert('Entrada TOKEN nula'); return; }
         ngrokURL = `https://${ngrokToken}.ngrok-free.app`;
         playerColor = $playerColorSelect.val();
         gameTimeMillis = parseInt($gameTimeSelect.val(), 10);
@@ -170,7 +171,7 @@
         const readyResponse = await sendUCICommand('isready');
         if (!readyResponse || !readyResponse.includes('readyok')) {
              alert('Não foi possível conectar ou a engine não está pronta.');
-             $startBtn.prop('disabled', false).text('Iniciar Jogo'); return;
+             $startBtn.prop('disabled', false).text('Start'); return;
         }
 
         $('#setup-container').hide(); $('#info-container').show(); $('#myBoard').show();
@@ -195,7 +196,7 @@
         $(window).resize(board.resize);
 
         playerTime = engineTime = gameTimeMillis;
-        $('#player-timer').text(`Jogador: ${formatTime(playerTime)}`);
+        $('#player-timer').text(`Player: ${formatTime(playerTime)}`);
         $('#engine-timer').text(`Engine: ${formatTime(engineTime)}`);
         if (timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(updateTimers, 1000);
